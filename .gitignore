@@ -1,0 +1,10 @@
+.vs/
+x64/
+Win32/
+Debug/
+Release/
+Risoluto.*/
+build/
+obj/
+dist/
+*.vcxproj.user

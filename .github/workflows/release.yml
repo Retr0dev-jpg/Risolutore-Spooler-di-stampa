@@ -1,0 +1,65 @@
+name: Build and Latest Release
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $project = "Risolutore Spooler di stampa.vcxproj"
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          foreach ($target in @(@{ Platform = "x64"; Arch = "x64" }, @{ Platform = "Win32"; Arch = "x86" })) {
+            $out = Join-Path $env:GITHUB_WORKSPACE "build\$($target.Arch)\"
+            msbuild $project /m /nologo /v:minimal `
+              /p:Configuration=Release `
+              /p:Platform=$($target.Platform) `
+              /p:PlatformToolset=v145 `
+              "/p:OutDir=$out" `
+              "/p:IntDir=$(Join-Path $env:GITHUB_WORKSPACE "obj\$($target.Arch)\")"
+            if ($LASTEXITCODE -ne 0) { throw "Build failed for $($target.Platform)" }
+            Copy-Item -LiteralPath (Join-Path $out "Risolutore Spooler di stampa.exe") `
+              -Destination (Join-Path $dist "RisolutoreSpooler-$($target.Arch).exe")
+          }
+
+      - name: Publish Latest GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $sha = "${{ github.sha }}"
+          $run = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $notes = @"
+          Automated build.
+
+          - Commit: ``$sha``
+          - Workflow run: $run
+          "@
+          $files = @(
+            (Join-Path $env:GITHUB_WORKSPACE "dist\RisolutoreSpooler-x64.exe"),
+            (Join-Path $env:GITHUB_WORKSPACE "dist\RisolutoreSpooler-x86.exe")
+          )
+          foreach ($f in $files) {
+            if (-not (Test-Path -LiteralPath $f)) { throw "Missing artifact $f" }
+          }
+          gh release delete latest --yes --cleanup-tag 2>$null
+          gh release create latest @files `
+            --title "Latest" `
+            --notes $notes `
+            --latest `
+            --target $sha
